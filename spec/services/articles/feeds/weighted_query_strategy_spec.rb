@@ -3,9 +3,18 @@ require "rails_helper"
 RSpec.describe Articles::Feeds::WeightedQueryStrategy, type: :service do
   subject(:feed_strategy) { described_class.new(user: user) }
 
-  let(:user) { create(:user) }
+  describe "with a nil user" do
+    let(:user) { nil }
 
-  describe "#call" do
+    it "#call performs a successful query" do
+      article = create(:article)
+      expect(feed_strategy.call).to match_array([article])
+    end
+  end
+
+  describe "with a non-nil user" do
+    let(:user) { create(:user) }
+
     describe "with modified :scoring_configs" do
       subject(:feed_strategy) { described_class.new(user: user, scoring_configs: scoring_configs) }
 
@@ -20,7 +29,7 @@ RSpec.describe Articles::Feeds::WeightedQueryStrategy, type: :service do
         }
       end
 
-      it "performs a successful query" do
+      it "#call performs a successful query" do
         # Yes, this is not a very exciting test.  However, the purpose
         # of the test is to see if the SQL statement runs.
         article = create(:article)
@@ -28,7 +37,7 @@ RSpec.describe Articles::Feeds::WeightedQueryStrategy, type: :service do
       end
     end
 
-    it "performs a successful query" do
+    it "#call performs a successful query" do
       # Yes, this is not a very exciting test.  However, the purpose
       # of the test is to see if the SQL statement runs.
       article = create(:article)
