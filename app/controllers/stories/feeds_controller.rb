@@ -34,7 +34,10 @@ module Stories
     end
 
     def signed_in_base_feed
-      if Settings::UserExperience.feed_strategy == "basic"
+      feed_variant = field_test(:feed_strategy, participant: current_user)
+      if feed_variant == "weighted_query_strategy"
+        Articles::Feeds::WeightedQueryStrategy.new(user: current_user, page: @page, tags: params[:tag]).call
+      elsif Settings::UserExperience.feed_strategy == "basic"
         Articles::Feeds::Basic.new(user: current_user, page: @page, tag: params[:tag]).feed
       else
         feed = Articles::Feeds::LargeForemExperimental.new(user: current_user, page: @page, tag: params[:tag])
@@ -43,7 +46,10 @@ module Stories
     end
 
     def signed_out_base_feed
-      if Settings::UserExperience.feed_strategy == "basic"
+      feed_variant = field_test(:feed_strategy, participant: current_user)
+      if feed_variant == "weighted_query_strategy"
+        Articles::Feeds::WeightedQueryStrategy.new(user: nil, page: @page, tags: params[:tag]).call
+      elsif Settings::UserExperience.feed_strategy == "basic"
         Articles::Feeds::Basic.new(user: nil, page: @page, tag: params[:tag]).feed
       else
         Articles::Feeds::LargeForemExperimental.new(user: current_user, page: @page, tag: params[:tag])
