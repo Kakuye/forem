@@ -47,7 +47,7 @@ module Articles
             [9, 0.55], [10, 0.5], [11, 0.4],
             [12, 0.3], [13, 0.2], [14, 0.1]
           ],
-          fallback: 0,
+          fallback: 0.001,
           requires_user: false
         },
         # Weight to give for the number of comments on the article
@@ -120,7 +120,7 @@ module Articles
         spaminess_factor: {
           clause: "articles.spaminess_rating",
           cases: [[0, 1]],
-          fallback: 0.05,
+          fallback: 0,
           requires_user: false
         }
       }.freeze
@@ -147,6 +147,7 @@ module Articles
         @page = page.to_i
         @tag = tag
         @default_user_experience_level = config.fetch(:default_user_experience_level) { DEFAULT_USER_EXPERIENCE_LEVEL }
+        @oldest_published_at = determine_oldest_published_at(user: @user)
         @scoring_configs = config.fetch(:scoring_configs) { default_scoring_configs }
         configure!(scoring_configs: @scoring_configs)
       end
@@ -164,12 +165,16 @@ module Articles
       # @todo Need to impliment a common interface for the
       # Articles::Feeds for both Basic and LargeForemExperimental as
       # well as the signed in and not signed in cases.
+      #
+      # @todo Handle pagination (e.g. how many pages are there?)
+      # @todo Handle eager load of `includes(top_comments: :user)`
       def call
         if @user.nil?
           Article.find_by_sql([
                                 sql_for_nil_user,
                                 {
-                                  number_of_results: @number_of_articles.to_i
+                                  number_of_results: @number_of_articles.to_i,
+                                  oldest_published_at: @oldest_published_at
                                 },
                               ])
         else
@@ -178,10 +183,42 @@ module Articles
                                 {
                                   user_id: @user.id,
                                   number_of_results: @number_of_articles.to_i,
-                                  default_user_experience_level: @default_user_experience_level.to_i
+                                  default_user_experience_level: @default_user_experience_level.to_i,
+                                  oldest_published_at: @oldest_published_at
                                 },
                               ])
         end
+      end
+
+      # The featured story should be the article that:
+      #
+      # - has the highest relevance score for the nil_user version
+      # - has `featured = true`
+      # - (OPTIONALLY) has a main image
+      #
+      # The other articles should use the nil_user version and require
+      # the `featured = true` attribute.  In my envisioned
+      # implementation, the pagination would omit the featured story.
+      #
+      # @note Per prior work, a featured story is the article that has
+      #       a main image, is marked as featured (e.g., featured =
+      #       true), and has the highest relevance score.  In the
+      #       Articles::Feeds::LargeForemExperimental object we used
+      #       the hotness_score to determine which to use.  The
+      #       hotness score is most analogue to how this class
+      #       calculates the relevance score when we don't have a
+      #       user.
+      # @note There are requests to allow for the featured article to
+      #       NOT require a main image.  We're still talking through
+      #       what that means.
+      #
+      # @return [Array<Article, Array<Article>] a featured story
+      #         Article and an array of Article objects.
+      def featured_story_and_default_home_feed(feature_requires_image: true)
+        # TODO: Get the featured item
+        # TODO: Get the requested page (skipping the featured item)
+        # TODO: Do we need to consider the pagination wrapper?
+        # TODO: Account for eager joins?
       end
 
       private
@@ -201,16 +238,15 @@ module Articles
               ON comments.commentable_id = articles.id
                 AND comments.commentable_type = 'Article'
             WHERE published = true
+              AND articles.published_at > :oldest_published_at
             GROUP BY articles.id,
-              articles.title,
               articles.published_at,
               articles.comments_count,
-              articles.experience_level_rating,
               articles.spaminess_rating,
               articles.reactions_count
             ORDER BY relevance_score DESC,
               articles.published_at DESC
-            #{offset_if_applicable} LIMIT :number_of_results)
+              #{offset_if_applicable} LIMIT :number_of_results)
           SELECT articles.*
           FROM articles
           INNER JOIN top_articles
@@ -264,6 +300,7 @@ module Articles
               ON comments.commentable_id = articles.id
                 AND comments.commentable_type = 'Article'
             WHERE published = true
+              AND articles.published_at > :oldest_published_at
             GROUP BY articles.id,
               articles.published_at,
               articles.comments_count,
@@ -272,7 +309,7 @@ module Articles
               articles.reactions_count
             ORDER BY relevance_score DESC,
               articles.published_at DESC
-            #{offset_if_applicable} LIMIT :number_of_results)
+              #{offset_if_applicable} LIMIT :number_of_results)
           SELECT articles.*
           FROM articles
           INNER JOIN top_articles
@@ -280,6 +317,10 @@ module Articles
           WHERE relevance_score > 0
           ORDER BY articles.published_at DESC;
         THE_SQL_STATEMENT
+      end
+
+      def determine_oldest_published_at(user:)
+        [(user&.page_views&.second_to_last&.created_at || 7.days.ago) - 18.hours, 7.days.ago].max
       end
 
       # We multiply the relevance score components together.
